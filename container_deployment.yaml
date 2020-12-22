@@ -1,0 +1,44 @@
+---
+
+wireguard:
+  servers:
+      
+    - name: wg_server
+      uuid: 4cc5cba8-7d0f-4bc7-a390-b8c43047bec2
+      server: f70
+      user: monitoruser1
+      state: started
+      ports: ['48222:12512/udp']
+      image: wg_server_base_release
+      private_key: 'sAIqqaSXYzsPivwaksKm1nfmb5ATlluqZQlqUiBHUVM='
+      public_key: 'jt1Be787WRzOJblA/09YE7Mh5qrdZ1mT/AeI5GEAiH0='
+      clients:
+        - public_key: /FcFMP4id1Wu8rhgJRc9cHjPWzEqoTisXkCt1ZtUQRI=
+        - public_key: Bi4dJPt7OjAUS9AoqwFZKAp4/bWfmxn8pKcKWNKl5Vc=
+
+
+  clients: []
+  _clients:
+    - name: wg_client1
+      uuid: 9d52df85-be29-470b-b8c8-df85ca19793c
+      public_key: '/FcFMP4id1Wu8rhgJRc9cHjPWzEqoTisXkCt1ZtUQRI='
+      server: f80
+      user: monitoruser1
+      state: started
+      image: wg_client_base_release
+      ports: []
+
+
+    - name: wg_client2
+      uuid: 0ba68cd3-7558-4442-88b1-5d6b6f132ef7
+      public_key: 'Bi4dJPt7OjAUS9AoqwFZKAp4/bWfmxn8pKcKWNKl5Vc='
+      server: f80
+      user: monitoruser1
+      state: started
+      image: wg_client_base_release
+      ports: []
+
+
+
+
+...

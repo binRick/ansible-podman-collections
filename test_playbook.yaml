@@ -1,0 +1,363 @@
+---
+- name: Podman tests
+  hosts: all
+  strategy: free
+  collections:
+    - containers.podman
+  vars_files: [container_deployment.yaml]
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    fedora_releases: ['32', '33']
+    podman_users: ['monitoruser1']
+    registry: "{{lookup('env','REGISTRY')}}"
+    registryuser: "{{lookup('env','REGISTRY_USER')}}"
+    registrypassword: "{{lookup('env','REGISTRY_PASS')}}"
+    registryimages:
+        - wg_client_base_release
+        - wg_server_base_release
+        - haproxy_base_release
+
+    VALIDATE_MODE: no
+    DELETE_ALL_PODS_AND_CONTAINERS: "{{lookup('env','DELETE_ALL_PODS_AND_CONTAINERS')|default(no)|bool}}"
+    DEPLOY_MODE: yes
+    DEPLOY_WIREGUARD_SERVER_MODE: yes
+    DEPLOY_WIREGUARD_CLIENT_MODE: no
+    ACQUIRE_PODMAN_INFO: yes
+
+  tasks:
+
+    - name: Validate Podman Setup
+      when:
+        - VALIDATE_MODE
+      block:
+        - name: Execute Podman Binary
+          loop: "{{podman_users}}"
+          become: yes
+          become_user: "{{item}}"
+          register: podman_info
+          command:
+            warn: no
+            cmd: podman info --format json
+
+        - name: Pull Fedora Images
+          with_nested:
+            - "{{fedora_releases}}"
+            - "{{podman_users}}"
+          become: yes
+          vars:
+            fedora_release: "{{item.0}}"
+            podman_user: "{{item.1}}"
+          become_user: "{{podman_user}}"
+          podman_image:
+            name: fedora
+            tag: "{{fedora_release}}"
+
+    - name: Login to remote registry
+      loop: "{{podman_users}}"
+      become: yes
+      become_user: "{{item}}"
+      register: podman_info
+      command:
+        warn: no
+        cmd: podman login -u {{registryuser}} -p {{registrypassword}} {{registry}}
+
+    - name: Pull Latest Registry Images
+      with_nested:
+        - "{{registryimages}}"
+        - "{{podman_users}}"
+      become: yes
+      vars:
+        registryimage: "{{registry}}/{{item.0}}:latest"
+        podman_user: "{{item.1}}"
+      become_user: "{{podman_user}}"
+      podman_image:
+        name: "{{registryimage}}"
+
+    - name: Delete Pods and Containers Deployment
+      when:
+        - DELETE_ALL_PODS_AND_CONTAINERS
+      block:
+        - name: Delete Pods and Containers
+          loop: "{{podman_users}}"
+          vars:
+            podman_user: "{{item}}"
+            rm_cmd: "podman pod rm -a; podman rm -a; podman pod rm -af; podman rm -af; podman ps -a"
+          become: yes
+          become_user: "{{podman_user}}"
+          shell:
+            warn: no
+            cmd: "{{rm_cmd}}"
+
+    
+    - name: Execute Deployment
+      when:
+        - DEPLOY_MODE
+      block:
+        - name: Execute Wireguard Server Deployment
+          when:
+            - DEPLOY_WIREGUARD_SERVER_MODE
+          block:
+            - name: Debug wireguard deployment
+              debug: var=wireguard.servers
+
+            - name: Create Wireguard Server Pods
+              loop: "{{wireguard.servers}}"
+              become: yes
+              become_user: "{{podman_user}}"
+              vars:
+                podman_user: "{{item.user}}"
+                pod_uuid: "{{item.uuid}}"
+                pod_server: "{{item.server}}"
+                pod_state: "{{item.state}}"
+                pod_ports: "{{item.ports}}"
+                pod_name: "{{item.name}}_{{podman_user}}_server_pod"
+              when:
+                - inventory_hostname == pod_server
+              podman_pod:
+                recreate: yes
+                name: "{{pod_name}}"
+                state: "{{pod_state}}"
+                publish: "{{pod_ports}}"
+                label:
+                  type: pod
+                  uuid: "{{pod_uuid}}"
+                  pod_type: wireguard
+                  wireguard_mode: server
+
+            - name: Create Wireguard Server Containers
+              loop: "{{wireguard.servers}}"
+              become: yes
+              become_user: "{{podman_user}}"
+              vars:
+                podman_user: "{{item.user}}"
+                container_uuid: "{{item.uuid}}"
+                container_server: "{{item.server}}"
+                container_state: "{{item.state}}"
+                container_ports: "{{item.ports}}"
+                container_image: "{{registry}}/{{item.image}}"
+                container_name: "{{item.name}}_{{podman_user}}_server"
+                container_clients: "{{item.clients}}"
+                public_key: "{{item.public_key}}"
+                private_key: "{{item.private_key}}"
+                pod_name: "{{item.name}}_{{podman_user}}_server_pod"
+              when:
+                - inventory_hostname == container_server
+              podman_container:
+                recreate: yes
+                command: ["/usr/sbin/init"]
+                rm: no
+                image_strict: yes
+                init: no
+                name: "{{container_name}}"
+                image: "{{container_image}}"
+                state: "{{item.state}}"
+#                log_driver: json-file
+                restart_policy: "always"
+                pod: "{{pod_name}}"
+                detach: yes
+                memory: 512m
+                memory_swap: 1024m
+                pids_limit: '100'
+                read_only_tmpfs: yes
+                label:
+                  uuid: "{{container_uuid}}"
+                  type: container
+                  container_type: wireguard
+                  wireguard_mode: server
+                cap_add:
+                  - NET_ADMIN
+                  - SYS_MODULE
+                env:
+                    SECRET_KEY: "ssssh"
+                    BOOLEAN_KEY: "yes"
+                    SERVER_PUBLIC_KEY: "{{public_key}}"
+                    SERVER_PRIVATE_KEY: "{{private_key}}"
+                    CLIENTS_ENCODED: "{{container_clients|to_json|b64encode}}"
+
+        - name: Execute Wireguard Client Deployment
+          when:
+            - DEPLOY_WIREGUARD_CLIENT_MODE
+          block:
+            - name: Debug wireguard client deployment
+              debug: var=wireguard.clients
+
+            - name: Create Wireguard Client Pods
+              loop: "{{wireguard.clients}}"
+              become: yes
+              become_user: "{{podman_user}}"
+              vars:
+                podman_user: "{{item.user}}"
+                pod_uuid: "{{item.uuid}}"
+                pod_server: "{{item.server}}"
+                pod_state: "{{item.state}}"
+                pod_ports: "{{item.ports}}"
+                pod_name: "{{item.name}}_{{podman_user}}_client_pod"
+              podman_pod:
+                recreate: yes
+                name: "{{pod_name}}"
+                state: "{{pod_state}}"
+                publish: "{{pod_ports}}"
+                label:
+                  type: pod
+                  uuid: "{{pod_uuid}}"
+                  pod_type: wireguard
+                  wireguard_mode: client
+
+            - name: Create Wireguard Clients
+              loop: "{{wireguard.clients}}"
+              become: yes
+              become_user: "{{podman_user}}"
+              vars:
+                podman_user: "{{item.user}}"
+                container_uuid: "{{item.uuid}}"
+                pod_uuid: "{{item.uuid}}"
+                container_server: "{{item.server}}"
+                container_state: "{{item.state}}"
+                container_ports: "{{item.ports}}"
+                container_image: "{{registry}}/{{item.image}}"
+                container_name: "{{item.name}}_{{podman_user}}_client"
+                pod_name: "{{item.name}}_{{podman_user}}_client_pod"
+              when:
+                - inventory_hostname == container_server
+              podman_container:
+                recreate: yes
+                command: ["/usr/sbin/init"]
+                rm: no
+                name: "{{container_name}}"
+                image: "{{container_image}}"
+                state: "{{item.state}}"
+                image_strict: yes
+                restart_policy: "unless-stopped"
+                pod: "{{pod_name}}"
+                init: no
+#                log_driver: json-file
+                detach: yes
+                memory: 512m
+                memory_swap: 1024m
+                pids_limit: '100'
+                read_only_tmpfs: yes
+                label:
+                  type: container
+                  uuid: "{{container_uuid}}"
+                  container_type: wireguard
+                  wireguard_mode: client
+                cap_add:
+                  - NET_ADMIN
+                  - SYS_MODULE
+                env:
+                    SECRET_KEY: "ssssh"
+                    BOOLEAN_KEY: "yes"
+
+
+
+    - name: Acquire Podman Information
+      when:
+        - ACQUIRE_PODMAN_INFO
+      block:
+        - name: Gather info for all images
+          register: images_info
+          loop: "{{podman_users}}"
+          become: yes
+          become_user: "{{item}}"
+          podman_image_info:
+
+        - name: debug images
+          when: images_info is success
+          loop: "{{images_info.results}}"
+          vars:
+            images_qty: "{{item.images|length}}"
+            podman_user: "{{item.item}}"
+          debug: 
+            msg: "User {{podman_user}} has {{images_qty}} images"
+
+        - name: Gather info about all present pods
+          loop: "{{podman_users}}"
+          register: pods_info
+          become: yes
+          become_user: "{{item}}"
+          podman_pod_info:
+
+        - name: debug pods
+          when: pods_info is success
+          loop: "{{pods_info.results}}"
+          vars:
+            pods_qty: "{{item.pods|length}}"
+            podman_user: "{{item.item}}"
+          debug:
+            msg: 
+                - "User {{podman_user}} has {{pods_qty}} pods"
+
+        - name: Gather info about all present containers
+          loop: "{{podman_users}}"
+          register: containers_info
+          become: yes
+          become_user: "{{item}}"
+          podman_container_info:
+
+        - name: debug containers
+          when: containers_info is success
+          loop: "{{containers_info.results}}"
+          vars:
+            containers_qty: "{{item.containers|length}}"
+            podman_user: "{{item.item}}"
+          debug:
+            msg: 
+                - "User {{podman_user}} has {{containers_qty}} containers"
+
+        - name: Gather info about all present networks
+          loop: "{{podman_users}}"
+          register: networks_info
+          become: yes
+          become_user: "{{item}}"
+          podman_network_info:
+
+        - name: debug networks
+          when: networks_info is success
+          loop: "{{networks_info.results}}"
+          vars:
+            networks_qty: "{{item.networks|length}}"
+            podman_user: "{{item.item}}"
+          debug:
+            msg: 
+                - "User {{podman_user}} has {{networks_qty}} networks"
+
+
+        - name: Gather info about all present volumes
+          loop: "{{podman_users}}"
+          register: volumes_info
+          become: yes
+          become_user: "{{item}}"
+          podman_volume_info:
+
+        - name: debug volumes
+          when: volumes_info is success
+          loop: "{{volumes_info.results}}"
+          vars:
+            volumes_qty: "{{item.volumes|length}}"
+            podman_user: "{{item.item}}"
+          debug:
+            msg: 
+                - "User {{podman_user}} has {{volumes_qty}} volumes"
+
+        - name: Gather info about all present registry logins
+          loop: "{{podman_users}}"
+          register: logins_info
+          become: yes
+          become_user: "{{item}}"
+          podman_login_info:
+            registry: "{{registry}}"
+
+        - name: debug registry logins
+          when: logins_info is success
+          loop: "{{logins_info.results}}"
+          vars:
+            is_logged_in: "{{item.login.logged_in|bool}}"
+            registry: "{{item.login.registry}}"
+            podman_user: "{{item.item}}"
+          debug:
+            msg: 
+                - "User {{podman_user}} is logged into {{registry}}: {{is_logged_in}}"
+
+
+
+...
