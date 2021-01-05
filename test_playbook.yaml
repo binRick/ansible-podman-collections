@@ -21,7 +21,7 @@
     DELETE_ALL_PODS_AND_CONTAINERS: "{{lookup('env','DELETE_ALL_PODS_AND_CONTAINERS')|default(no)|bool}}"
     DEPLOY_MODE: yes
     DEPLOY_WIREGUARD_SERVER_MODE: yes
-    DEPLOY_WIREGUARD_CLIENT_MODE: no
+    DEPLOY_WIREGUARD_CLIENT_MODE: yes
     ACQUIRE_PODMAN_INFO: yes
 
   tasks:
@@ -72,6 +72,10 @@
       become_user: "{{podman_user}}"
       podman_image:
         name: "{{registryimage}}"
+        pull: yes
+        push: no
+        state: present
+        force: yes
 
     - name: Delete Pods and Containers Deployment
       when:

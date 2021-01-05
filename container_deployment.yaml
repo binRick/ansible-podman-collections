@@ -14,14 +14,15 @@ wireguard:
       public_key: 'jt1Be787WRzOJblA/09YE7Mh5qrdZ1mT/AeI5GEAiH0='
       clients:
         - public_key: /FcFMP4id1Wu8rhgJRc9cHjPWzEqoTisXkCt1ZtUQRI=
+          ip: 10.25.25.100
         - public_key: Bi4dJPt7OjAUS9AoqwFZKAp4/bWfmxn8pKcKWNKl5Vc=
+          ip: 10.25.25.101
 
 
-  clients: []
-  _clients:
+  clients:
     - name: wg_client1
       uuid: 9d52df85-be29-470b-b8c8-df85ca19793c
-      public_key: '/FcFMP4id1Wu8rhgJRc9cHjPWzEqoTisXkCt1ZtUQRI='
+      public_key: /FcFMP4id1Wu8rhgJRc9cHjPWzEqoTisXkCt1ZtUQRI=
       server: f80
       user: monitoruser1
       state: started
@@ -31,7 +32,7 @@ wireguard:
 
     - name: wg_client2
       uuid: 0ba68cd3-7558-4442-88b1-5d6b6f132ef7
-      public_key: 'Bi4dJPt7OjAUS9AoqwFZKAp4/bWfmxn8pKcKWNKl5Vc='
+      public_key: Bi4dJPt7OjAUS9AoqwFZKAp4/bWfmxn8pKcKWNKl5Vc=
       server: f80
       user: monitoruser1
       state: started
